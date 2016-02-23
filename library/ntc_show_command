@@ -112,11 +112,6 @@ options:
         default: null
         choices: []
         aliases: []
-<<<<<<< HEAD
-    use_keys:
-        description:
-            - Option to use ssh keys for login
-=======
     secret:
         description:
             - Password used to enter a privileged mode on the target device
@@ -127,30 +122,17 @@ options:
     use_keys:
         description:
             - Boolean true/false if ssh key login should be attempted
->>>>>>> networktocode/master
         required: false
         default: false
         choices: []
         aliases: []
-<<<<<<< HEAD
-    ssh_key_file:
-        description:
-            - Path to ssh key file to use for login
-=======
     key_file:
         description:
             - Path to private ssh key used for login
->>>>>>> networktocode/master
         required: false
         default: null
         choices: []
         aliases: []
-<<<<<<< HEAD
-
-
-
-=======
->>>>>>> networktocode/master
 '''
 EXAMPLES = '''
 
@@ -162,8 +144,6 @@ EXAMPLES = '''
     host={{ inventory_hostname }}
     username={{ username }}
     password={{ password }}
-    use_keys=false
-    ssh_key_file='/path/to/ssh/key/id_dsa'
 
 # get snmp community
 - ntc_show_command:
@@ -223,14 +203,9 @@ def main():
             delay=dict(default=1, required=False),
             username=dict(required=False, type='str'),
             password=dict(required=False, type='str'),
-<<<<<<< HEAD
-            use_keys=dict(required=False),
-            ssh_key_file=dict(required=False),
-=======
             secret=dict(required=False, type='str'),
             use_keys=dict(required=False, default=False),
             key_file=dict(required=False, default=None, type='str'),
->>>>>>> networktocode/master
         ),
         required_together=(
             ['host', 'password', 'username'],
@@ -249,14 +224,9 @@ def main():
     command = module.params['command']
     username = module.params['username']
     password = module.params['password']
-<<<<<<< HEAD
-    use_keys = module.params['use_keys']
-    ssh_key_file = module.params['ssh_key_file']
-=======
     secret = module.params['secret']
     use_keys = module.params['use_keys']
     key_file = module.params['key_file']
->>>>>>> networktocode/master
     port = int(module.params['port'])
     delay = int(module.params['delay'])
 
@@ -286,18 +256,12 @@ def main():
                     port=port,
                     username=username,
                     password=password,
-<<<<<<< HEAD
-                    use_keys=use_keys,
-                    key_file=ssh_key_file,
-                    )
-=======
                     secret=secret,
                     use_keys=use_keys,
                     key_file=key_file
-                    )   
+                    )
         if secret:
             device.enable()
->>>>>>> networktocode/master
 
         rawtxt = device.send_command(command, delay_factor=delay)
 
