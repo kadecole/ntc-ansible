@@ -33,12 +33,18 @@ options:
         description:
             - Switch platform
         required: true
-        choices: ['cisco_nxos_nxapi', 'arista_eos_eapi', 'cisco_ios']
+        choices: ['cisco_nxos_nxapi', 'arista_eos_eapi', 'cisco_ios_ssh']
     timer:
         description:
             - Time in minutes after which the device will be rebooted.
         required: false
         default: null
+    timeout:
+        description:
+            - Time in seconds to wait for the device and API to come back up.
+              Uses specified port/protocol as defined with port and protocol params.
+        required: false
+        default: 240
     confirm:
         description:
             - Safeguard boolean. Set to true if you're sure you want to reboot.
@@ -100,14 +106,14 @@ EXAMPLES = '''
     ntc_conf_file: .ntc.conf
     confirm: true
 
-- ntc_file_copy:
+- ntc_reboot:
     platform: arista_eos_eapi
     confirm: true
     host: "{{ inventory_hostname }}"
     username: "{{ username }}"
     password: "{{ password }}"
 
-- ntc_file_copy:
+- ntc_reboot:
     platform: cisco_ios
     confirm: true
     timer: 5
@@ -123,7 +129,22 @@ rebooted:
     returned: success
     type: boolean
     sample: true
+reachable:
+    description: Whether the device is reachable on specified port
+                 after rebooting.
+    returned: always
+    type: boolean
+    sample: true
+atomic:
+    description: Whether the module has atomically completed all steps,
+                 including testing port and closing connection after
+                 rebooting.
+    returned: always
+    type: boolean
+    sample: true
 '''
+
+import time
 
 try:
     HAS_PYNTC = True
@@ -135,6 +156,32 @@ PLATFORM_NXAPI = 'cisco_nxos_nxapi'
 PLATFORM_IOS = 'cisco_ios_ssh'
 PLATFORM_EAPI = 'arista_eos_eapi'
 PLATFORM_JUNOS = 'juniper_junos_netconf'
+
+
+def check_device(module, username, password, host, timeout, kwargs):
+    success = False
+    attempts = timeout / 30
+    counter = 0
+    atomic = False
+    while counter < attempts and not success:
+        try:
+            if module.params['ntc_host'] is not None:
+                device = ntc_device_by_name(module.params['ntc_host'],
+                                            module.params['ntc_conf_file'])
+            else:
+                device_type = module.params['platform']
+                device = ntc_device(device_type, host, username, password, **kwargs)
+            success = True
+            atomic = True
+            try:
+                device.close()
+            except:
+                atomic = False
+                pass
+        except:
+            time.sleep(30)
+            counter += 1
+    return success, atomic
 
 
 def main():
@@ -152,6 +199,7 @@ def main():
             ntc_conf_file=dict(required=False),
             confirm=dict(required=False, default=False, type='bool', choices=BOOLEANS),
             timer=dict(requred=False, type='int'),
+            timeout=dict(required=False, type='int', default=240)
         ),
         mutually_exclusive=[['host', 'ntc_host'],
                             ['ntc_host', 'secret'],
@@ -181,10 +229,10 @@ def main():
     port = module.params['port']
     secret = module.params['secret']
 
+    kwargs = {}
     if ntc_host is not None:
         device = ntc_device_by_name(ntc_host, ntc_conf_file)
     else:
-        kwargs = {}
         if transport is not None:
             kwargs['transport'] = transport
         if port is not None:
@@ -197,6 +245,7 @@ def main():
 
     confirm = module.params['confirm']
     timer = module.params['timer']
+    timeout = module.params['timeout']
 
     if not confirm:
         module.fail_json(msg='confirm must be set to true for this module to work.')
@@ -217,11 +266,13 @@ def main():
     else:
         device.reboot(confirm=True)
 
+    time.sleep(10)
+    reachable, atomic = check_device(module, username, password, host, timeout, kwargs)
+
     changed = True
     rebooted = True
 
-    device.close()
-    module.exit_json(changed=changed, rebooted=rebooted)
+    module.exit_json(changed=changed, rebooted=rebooted, reachable=reachable, atomic=atomic)
 
 from ansible.module_utils.basic import *
 main()
