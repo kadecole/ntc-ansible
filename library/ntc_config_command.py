@@ -32,63 +32,52 @@ options:
               for testing
         required: false
         default: ssh
-        choices: ['ssh']
-        aliases: []
+        choices: ['ssh', 'telnet']
     platform:
         description:
             - Platform FROM the index file
-        required: true
-        default: ssh
-        choices: []
-        aliases: []
+        required: false
     commands:
         description:
             - Command to execute on target device
         required: false
         default: null
-        choices: []
-        aliases: []
     commands_file:
         description:
             - Command to execute on target device
-        required: true
-        default: null
-        choices: []
+        required: false
     host:
         description:
             - IP Address or hostname (resolvable by Ansible control host)
         required: false
-        default: null
-        choices: []
-        aliases: []
+    provider:
+        description
+          - Dictionary which acts as a collection of arguments used to define the characteristics
+            of how to connect to the device.
+            Note - host, username, password and platform must be defined in either provider
+            or local param
+            Note - local param takes precedence, e.g. hostname is preferred to provider['host']
+        required: false
     port:
         description:
             - SSH port to use to connect to the target device
         required: false
-        default: 22
-        choices: []
-        aliases: []
+        default: 22 for SSH. 23 for Telnet
     username:
         description:
             - Username used to login to the target device
         required: false
         default: null
-        choices: []
-        aliases: []
     password:
         description:
             - Password used to login to the target device
         required: false
         default: null
-        choices: []
-        aliases: []
     secret:
         description:
             - Password used to enter a privileged mode on the target device
         required: false
         default: null
-        choices: []
-        aliases: []
     use_keys:
         description:
             - Boolean true/false if ssh key login should be attempted
@@ -102,6 +91,14 @@ options:
 '''
 
 EXAMPLES = '''
+
+vars:
+  nxos_provider:
+    host: "{{ inventory_hostname }}"
+    username: "ntc-ansible"
+    password: "ntc-ansible"
+    platform: "cisco_nxos"
+    connection: ssh
 
 # write vlan data
 - ntc_config_command:
@@ -125,6 +122,14 @@ EXAMPLES = '''
     username: "{{ username }}"
     password: "{{ password }}"
     secret: "{{ secret }}"
+
+- ntc_config_command:
+    commands:
+      - vlan 10
+      - name vlan_10
+      - end
+    provider: "{{ nxos_provider }}"
+
 '''
 
 import os.path
@@ -146,25 +151,30 @@ def main():
 
     module = AnsibleModule(
         argument_spec=dict(
-            connection=dict(choices=['ssh'],
+            connection=dict(choices=['ssh', 'telnet'],
                             default='ssh'),
-            platform=dict(required=True),
+            platform=dict(required=False),
             commands=dict(required=False, type='list'),
             commands_file=dict(required=False),
             host=dict(required=False),
-            port=dict(default=22, required=False),
+            port=dict(required=False),
+            provider=dict(type='dict', required=False),
             username=dict(required=False, type='str'),
             password=dict(required=False, type='str'),
             secret=dict(required=False, type='str'),
             use_keys=dict(required=False, default=False, type='bool'),
             key_file=dict(required=False, default=None, type='str'),
         ),
-        required_together=(
-            ['host', 'password', 'username'],
-        ),
         supports_check_mode=False
     )
 
+    provider = module.params['provider'] or {}
+
+    # allow local params to override provider
+    for param, pvalue in provider.items():
+        module.params[param] = module.params.get(param, None) or pvalue
+
+    host = module.params['host']
     connection = module.params['connection']
     platform = module.params['platform']
     device_type = platform.split('-')[0]
@@ -175,16 +185,32 @@ def main():
     secret = module.params['secret']
     use_keys = module.params['use_keys']
     key_file = module.params['key_file']
-    port = int(module.params['port'])
+
+
+    argument_check = { 'host': host, 'username': username, 'platform': platform, 'password': password }
+    for key, val in argument_check.items():
+        if val is None:
+            module.fail_json(msg=str(key) + " is required")
 
     if module.params['host']:
         host = socket.gethostbyname(module.params['host'])
 
-    if connection == 'ssh' and not module.params['host']:
-        module.fail_json(msg='specify host if using connection=ssh')
+    if connection == 'telnet' and platform != 'cisco_ios':
+        module.fail_json(msg='only cisco_ios supports '
+                             'telnet connection')
 
-    if connection == 'ssh':
+    if platform == 'cisco_ios' and connection == 'telnet':
+        device_type = 'cisco_ios_telnet'
 
+    if module.params['port']:
+        port = int(module.params['port'])
+    else:
+        if connection == 'telnet':
+            port = 23
+        else:
+            port = 22
+
+    if connection in ['ssh', 'telnet']:
         device = ConnectHandler(device_type=device_type,
                                 ip=socket.gethostbyname(host),
                                 port=port,
@@ -200,14 +226,14 @@ def main():
 
         if commands:
             output = device.send_config_set(commands)
-
-        try:
-            if commands_file:
-                if os.path.isfile(commands_file):
-                    with open(commands_file, 'r') as f:
-                        output = device.send_config_set(f.readlines())
-        except:
-            module.fail_json(msg="Unable to locate: {}".format(commands_file))
+        else:
+            try:
+                if commands_file:
+                    if os.path.isfile(commands_file):
+                        with open(commands_file, 'r') as f:
+                            output = device.send_config_set(f.readlines())
+            except IOError:
+                module.fail_json(msg="Unable to locate: {}".format(commands_file))
 
     if (error_params(platform, output)):
         module.fail_json(msg="Error executing command:\
